@@ -1,0 +1,13 @@
+[package]
+name = "cargo-pkg"
+version = "0.2.9"
+authors = ["Kavan Mevada"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+description = """\
+A simple subcommand for the Cargo package manager for \
+building GTK packages from Rust projects."""
+repository = "https://github.com/kavanmevada/cargo-pkg"
+
+[dependencies]
+json = "0.12.4"
