@@ -2,7 +2,7 @@
 # It is not intended for manual editing.
 [[package]]
 name = "cargo-pkg"
-version = "0.2.9"
+version = "0.2.13"
 dependencies = [
  "json",
 ]

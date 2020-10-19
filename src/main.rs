@@ -71,12 +71,7 @@ fn build_and_install(metadata: &Metadata, prefix: &PathBuf, profile: &Profile) {
     let sharedir = prefix.join("share");
     let appdatadir = sharedir.join("appdata");
     let applicationsdir = sharedir.join("applications");
-    let glibdir = sharedir.join("glib-2.0").join("schemas");
     let localedir = sharedir.join("locale");
-    let appdir = sharedir.join(&metadata.app_id);
-    let hicolordir = sharedir.join("icons").join("hicolor");
-    let scalabledir = hicolordir.join("scalable").join("apps");
-    let symbolicdir = hicolordir.join("symbolic").join("apps");
 
 
     let mut map = HashMap::new();
@@ -89,77 +84,23 @@ fn build_and_install(metadata: &Metadata, prefix: &PathBuf, profile: &Profile) {
 
 
     let icons = Icon {
-        scalable: &icondir.join(&scalable).as_path().display().to_string(),
-        symbolic: &icondir.join(&symbolic).as_path().display().to_string(),
+        scalable: &icondir.join(&scalable),
+        symbolic: &icondir.join(&symbolic),
     }.install_all(prefix);
 
+    glib_compile_resources(
+        &pkgdatadir.join(&gresource),
+        resourcedir,
+        &prefix
+    );
 
-
-
-    if datadir.exists() {
-        std::fs::create_dir_all(&pkgdatadir);
-        for file in std::fs::read_dir(
-            &datadir.as_path().display().to_string()
-        ).expect("Error reading data directory") {
-            let mut p = file.unwrap().path();
-            if p.extension() == Some(OsStr::new("in")) {
-                let mut data = std::fs::read_to_string(&p).unwrap();
-                for (key, value) in map.iter() {   
-                    data = data.replace(key, &value);
-                };
-                let name = p.file_stem().unwrap().to_str().unwrap();
-                let output = pkgdatadir.join(name).as_path().display().to_string();
-                std::fs::write(&output, data).unwrap();
-            }
-        }
-    }
-
-
-    let gresource_xml = &pkgdatadir.join(&gresource);
-    if resourcedir.exists() && gresource_xml.exists() {
-        std::fs::create_dir_all(&appdir);
-        Command::new("glib-compile-resources").args(&[
-            &gresource_xml.as_path().display().to_string(),
-            "--sourcedir",
-            &resourcedir.as_path().display().to_string(),
-            "--internal",
-            "--generate",
-            "--target",
-            &appdir.join(&resource).as_path().display().to_string(),
-        ]).status().expect("Error executing glib-compile-resources");
-    }
-
+    configuration_data_dir(&datadir, &pkgdatadir, &map);
 
     if podir.exists() {
-
         if podir.join("POTFILES.in").exists()
             && podir.join("LINGUAS").exists() {
-
-            let input_desktop = &pkgdatadir.join(&desktop);
-            let input_appdata = &pkgdatadir.join(&appdata);
-
-            if input_desktop.exists() {
-                std::fs::create_dir_all(&applicationsdir);
-                Command::new("msgfmt").args(&[
-                    "--desktop",
-                    "--template",
-                    &input_desktop.as_path().display().to_string(),
-                    "-d", &podir.as_path().display().to_string(),
-                    "-o", &applicationsdir.join(&desktop).as_path().display().to_string(),
-                ]).status().expect("Error executing msgfmt");
-            }
-        
-            if input_appdata.exists() {
-                std::fs::create_dir_all(&appdatadir);
-                Command::new("msgfmt").args(&[
-                    "--xml",
-                    "--template",
-                    &input_appdata.as_path().display().to_string(),
-                    "-d", &podir.as_path().display().to_string(),
-                    "-o", &appdatadir.join(&appdata).as_path().display().to_string(),
-                ]).status().expect("Error executing msgfmt");
-            }
-
+            msgfmt(pkgdatadir.join(&desktop), "--desktop", &applicationsdir, &podir);
+            msgfmt(pkgdatadir.join(&appdata), "--xml", &appdatadir, &podir);
         }
 
         std::fs::create_dir_all(&localedir);
@@ -181,37 +122,93 @@ fn build_and_install(metadata: &Metadata, prefix: &PathBuf, profile: &Profile) {
                     .arg(&mo).status().expect("Error executing msgfmt");
             }
         }
-
-
-        std::fs::create_dir_all(&pkgdatadir);
-        let dest_path = PathBuf::from(&pkgdatadir).join("config.rs");
-        std::fs::write(&dest_path.as_path(),
-            &format!(
-                "pub static APP_ID: &str = \"{}\";
-                pub static APP_NAME: &str = \"{}\";
-                pub static PROFILE: &str = \"{}\";
-                pub static VERSION: &str = \"{}\";
-                pub static GETTEXT_PACKAGE: &str = \"{}\";
-                pub static PKGDATADIR: &str = \"{}\";
-                pub static LOCALEDIR: &str = \"{}\";
-                ",
-                &metadata.app_id,
-                &metadata.name,
-                if profile == &Profile::Release { "release" } else { "debug" },
-                &metadata.version,
-                &metadata.gettextdomain,
-                std::fs::canonicalize(&appdatadir).unwrap().display().to_string(),
-                std::fs::canonicalize(&localedir).unwrap().display().to_string(),
-            )
-        ).unwrap();
-        env::set_var("CONFIG_PATH", dest_path.as_path().display().to_string());
-
-
-        Cargo::install(prefix, 
-            if *profile == Profile::Debug { &["--debug"] }
-            else { &[] }
-        );
     }
+
+
+
+    std::fs::create_dir_all(&pkgdatadir);
+    let dest_path = PathBuf::from(&pkgdatadir).join("config.rs");
+    std::fs::write(&dest_path.as_path(),
+        &format!(
+            "pub static APP_ID: &str = \"{}\";
+pub static APP_NAME: &str = \"{}\";
+pub static PROFILE: &str = \"{}\";
+pub static VERSION: &str = \"{}\";
+pub static GETTEXT_PACKAGE: &str = \"{}\";
+pub static PKGDATADIR: &str = \"{}\";
+pub static LOCALEDIR: &str = \"{}\";
+",
+            &metadata.app_id,
+            &metadata.name,
+            if profile == &Profile::Release { "release" } else { "debug" },
+            &metadata.version,
+            &metadata.gettextdomain,
+            std::fs::canonicalize(&appdatadir).unwrap().display().to_string(),
+            std::fs::canonicalize(&localedir).unwrap().display().to_string(),
+        )
+    ).unwrap();
+    env::set_var("CONFIG_PATH", dest_path.as_path().display().to_string());
+
+
+    Cargo::install(prefix, 
+        if *profile == Profile::Debug { &["--debug"] }
+        else { &[] }
+    );
+}
+
+
+
+fn msgfmt(template: PathBuf, template_type: &str, installdir: &PathBuf, podir: &PathBuf) -> Option<std::process::ExitStatus> {
+    std::fs::create_dir_all(&installdir);
+    let outpath = template.swap_parent(installdir)?;
+
+    let status = Command::new("msgfmt").args(&[
+        template_type,
+        "--template",
+        &template.into_os_string().to_str()?,
+        "-d", &podir.to_owned().into_os_string().to_str()?,
+        "-o", &outpath.into_os_string().to_str()?,
+    ]).status().ok()?;
+
+    Some(status)
+}
+
+
+fn configuration_data_dir(datadir: &PathBuf, export: &PathBuf, variables: &HashMap<&str, &String>) -> Option<bool> {
+    std::fs::create_dir_all(&export);
+    for file in std::fs::read_dir(&datadir.as_path()).ok()? {
+        let mut p = file.ok()?.path();
+        if p.extension() == Some(OsStr::new("in")) {
+            let mut data = std::fs::read_to_string(&p).ok()?;
+            for (key, value) in variables.iter() {   
+                data = data.replace(key, &value);
+            };
+            let output = export.join(&p.file_stem()?);
+            std::fs::write(&output.as_path(), data).unwrap();
+        }
+    }
+    Some(true)
+}
+
+
+fn glib_compile_resources(path: &PathBuf, resourcedir: PathBuf, prefix: &PathBuf) -> Option<std::process::ExitStatus> {
+    let fname = &path.file_name()?.to_str()?;
+    let installdir = prefix.join("share")
+        .join("glib-2.0").join("schemas");
+
+    std::fs::create_dir_all(&installdir);
+    
+    let status = Command::new("glib-compile-resources").args(&[
+        &path.to_owned().into_os_string().to_str()?,
+        "--sourcedir",
+        &resourcedir.into_os_string().to_str()?,
+        "--internal",
+        "--generate",
+        "--target",
+        &installdir.join(&fname.replace(".xml", "")).into_os_string().to_str()?,
+    ]).status().ok()?;
+
+    Some(status)
 }
 
 
@@ -224,15 +221,15 @@ mod Cargo {
     pub fn install(prefix: &PathBuf, flags: &[&str]) -> Option<std::process::ExitStatus> {
         let prefix_os_str = prefix.as_os_str().to_str();
 
-        let result = Some(Command::new("cargo").args(&["install", "--force"])
+        let result = Command::new("cargo").args(&["install", "--force"])
             .args(flags).args(&["--path", ".", "--root"])
             .arg(prefix_os_str?)
-            .status().ok()?);
+            .status().ok()?;
 
         remove_file(prefix.join(".crates2.json").as_path());
         remove_file(prefix.join(".crates.toml").as_path());
 
-        result
+        Some(result)
     }
 }
 
@@ -250,27 +247,25 @@ impl Files for PathBuf {
 
 
 struct Icon<'a> {
-    scalable: &'a str,
-    symbolic: &'a str
+    scalable: &'a PathBuf,
+    symbolic: &'a PathBuf
 }
 
 impl Icon<'_> {
     fn install_all(&self, prefix: &PathBuf) {
-        let scalablein = PathBuf::from(self.scalable);
-        let symbolicin = PathBuf::from(self.symbolic);
 
         let scalabledir = prefix.join("share/icons/scalable/apps");
         let symbolicdir = prefix.join("share/icons/symbolic/apps");
 
         if let (Some(scalable), Some(symbolic)) = (
-            &scalablein.swap_parent(&scalabledir),
-            &symbolicin.swap_parent(&symbolicdir)
+            &self.scalable.swap_parent(&scalabledir),
+            &self.symbolic.swap_parent(&symbolicdir)
         ) {
             std::fs::create_dir_all(scalabledir.as_path());
-            std::fs::copy(scalablein, scalable);
+            std::fs::copy(self.scalable, scalable);
 
             std::fs::create_dir_all(symbolicdir.as_path());
-            std::fs::copy(symbolicin, symbolic);
+            std::fs::copy(self.symbolic, symbolic);
         }
     }
 }
