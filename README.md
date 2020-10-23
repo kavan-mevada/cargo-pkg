@@ -11,7 +11,7 @@ Install `cargo pkg` by running: `cargo install cargo-pkg`.
 To create new project, run `cargo pkg new`
 
 This will create a project with ID `io.foo.Bar` with following structure.
-
+```
 ├── Cargo.toml
 ├── data
 │   ├── icons
@@ -25,6 +25,7 @@ This will create a project with ID `io.foo.Bar` with following structure.
 │   └── POTFILES.in
 └── src
     └── main.rs
+```
     
 To change application ID in all file names `<NEW_ID>.appdata.xml.in`. and chnage ID in Cargo.toml
 
