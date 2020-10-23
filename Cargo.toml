@@ -1,6 +1,6 @@
 [package]
 name = "cargo-pkg"
-version = "0.2.13"
+version = "0.2.68"
 authors = ["Kavan Mevada"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -10,4 +10,4 @@ building GTK packages from Rust projects."""
 repository = "https://github.com/kavanmevada/cargo-pkg"
 
 [dependencies]
-json = "0.12.4"
+toml = "0.5"

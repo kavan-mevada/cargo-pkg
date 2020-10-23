@@ -2,13 +2,22 @@
 # It is not intended for manual editing.
 [[package]]
 name = "cargo-pkg"
-version = "0.2.13"
+version = "0.2.68"
 dependencies = [
- "json",
+ "toml",
 ]
 
 [[package]]
-name = "json"
-version = "0.12.4"
+name = "serde"
+version = "1.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "078e285eafdfb6c4b434e0d31e8cfcb5115b651496faca5749b88fafd4f23bfd"
+checksum = "b88fa983de7720629c9387e9f517353ed404164b1e482c970a90c1a4aaf7dc1a"
+
+[[package]]
+name = "toml"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75cf45bb0bef80604d001caaec0d09da99611b3c0fd39d3080468875cdb65645"
+dependencies = [
+ "serde",
+]
