@@ -1,6 +1,6 @@
 [package]
 name = "cargo-pkg"
-version = "0.2.68"
+version = "0.2.82"
 authors = ["Kavan Mevada"]
 edition = "2018"
 license = "MIT OR Apache-2.0"

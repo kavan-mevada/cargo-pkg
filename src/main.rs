@@ -1,67 +1,85 @@
 use std::{
     collections::HashMap, env, ffi::OsStr, fs::read_to_string, path::PathBuf, process::Command,
 };
-use toml::{from_str, value::Value};
 
-#[macro_export]
-macro_rules! die {
-    ($fmt:expr) => {
-        print!($fmt);
-        std::process::exit(-1)
-    };
-}
+use toml::{from_str, value::Value};
 
 mod commands;
 mod metadata;
 use commands::Commands;
 use metadata::Metadata;
 
-fn main() {
-    // Parse build args
-    let mut args: Vec<_> = env::args().filter(|s| s != "pkg").collect();
-    args.drain(..1);
-
-    // Determine profile from build flag
-    let profile = if args.contains(&"--release".to_string()) {
-        "release"
-    } else {
-        "debug"
-    };
-
-    let prefix = PathBuf::from(match args.last() {
-        Some(f) if !f.contains("--") => f,
-        _ => "/usr/local",
-    });
-
-    if let Some(command) = args.iter().nth(0) {
-        match command.as_str() {
-            "install" | "run" => {
-                if &args.len() > &2 {
-                    let metadata = Metadata::from("Cargo.toml").expect("Error parsing Cargo.toml");
-                    let builder = Builder::new(&args[1..args.len() - 1], profile);
-
-                    println!("\x1b[1;38;5;29m   Compiling\x1b[0m {}", metadata.id);
-                    builder.build(&metadata, &prefix);
-
-                    if command.as_str() == "run" {
-                        Command::new(prefix.join("bin").join(&metadata.bin).to_str().unwrap())
-                            .status()
-                            .ok();
-                    }
-                } else {
-                    println!("Invalid arguments");
-                    std::process::exit(-1);
-                }
-            }
-            "new" => {
-                Builder::create_project("io.foo.Bar", "Foo Bar", "foo-bar")
-                    .expect("Error creating project");
-            }
-            _ => {
-                println!("Invalid arguments");
-                std::process::exit(-1);
-            }
+#[macro_export]
+macro_rules! isexists {
+    ($str: tt) => {
+        if !std::process::Command::new($str).output().is_ok() {
+            println!("{} not found!", $str);
+            std::process::exit(-1);
         }
+    };
+}
+
+fn help() {
+    println!("Usage: cargo pkg [ACTION] [OPTION] DIR");
+    std::process::exit(-1);
+}
+
+fn main() {
+    // Check build dependent packages exists
+    // throw error & exit if not.
+    isexists!("msgfmt");
+    isexists!("glib-compile-resources");
+    isexists!("glib-compile-schemas");
+
+    let args = env::args().filter(|s| s != "pkg").collect::<Vec<_>>();
+
+    if args.get(1) == Some(&"new".to_owned())
+        && args.get(2) == Some(&"-id".to_owned())
+        && args.get(3).is_some()
+        && args.get(4) == Some(&"--name".to_owned())
+        && args.get(5).is_some()
+        && args.get(6).is_some()
+    {
+        let chars = args[3].matches('.').count();
+        if chars == 2 && args[3].chars().last() != Some('.') {
+            Builder::create_project(&args[3], &args[5], &args[6]);
+            println!(
+                "Created \"{}\" with application id \"{}\"",
+                args[5], args[3]
+            );
+        } else {
+            println!("App ID must follow this pattern `io.foo.Bar`");
+        }
+    } else if (args.get(1) == Some(&"run".to_owned()) || args.get(1) == Some(&"install".to_owned()))
+        && args.len() > 2
+    {
+        let buildflags = &args[2..args.len() - 1];
+        // println!("Building with agrs {}", buildflags.join(" "));
+
+        let profile = if buildflags.contains(&"--debug".to_owned()) {
+            "debug"
+        } else {
+            "release"
+        };
+
+        let prefix = PathBuf::from(match args.last() {
+            Some(f) if !f.contains("--") => f,
+            _ => "/usr/local",
+        });
+
+        let metadata = Metadata::from("Cargo.toml").expect("Error parsing Cargo.toml");
+        let builder = Builder::new(&args[2..args.len() - 1], profile);
+
+        let issuccess = builder.build(&metadata, &prefix);
+
+        if args.get(1) == Some(&"run".to_owned()) && issuccess {
+            Command::new(prefix.join("bin").join(&metadata.bin).to_str().unwrap())
+                .status()
+                .ok();
+        }
+    } else {
+        println!("Invalid arguments");
+        std::process::exit(-1);
     }
 }
 
@@ -79,21 +97,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn build(&self, metadata: &Metadata, prefix: &PathBuf) {
-
-        if !std::process::Command::new("msgfmt").spawn().is_ok() {
-            println!("msgfmt not found!");
-            std::process::exit(-1);
-        }
-        if !std::process::Command::new("glib-compile-resources").spawn().is_ok() {
-            println!("glib-compile-resources not found!");
-            std::process::exit(-1);
-        }
-        if !std::process::Command::new("glib-compile-schemas").spawn().is_ok() {
-            println!("glib-compile-schemas not found!");
-            std::process::exit(-1);
-        }
-        
+    fn build(&self, metadata: &Metadata, prefix: &PathBuf) -> bool {
         let datadir = PathBuf::from("data");
         let podir = PathBuf::from("po");
 
@@ -159,9 +163,15 @@ impl<'a> Builder<'a> {
             .expect("Error generating config.rs");
         //-----------------------------------------------------------
 
-        commands
-            .install_binary(self.buildflags, prefix)
-            .expect("Error installing binary");
+        if let Some(out) = commands.install_binary(self.buildflags, prefix) {
+            if out.code() == Some(101) {
+                return false;
+            } else {
+                return true;
+            }
+        } else {
+            return false;
+        }
     }
 
     pub fn create_project(id: &str, name: &str, bin: &str) -> Option<()> {
@@ -172,17 +182,31 @@ impl<'a> Builder<'a> {
 
         let toml = PathBuf::from(bin).join("Cargo.toml");
 
+        let template = std::fs::read_to_string(&toml).ok()?;
         std::fs::write(
             &toml,
             &format!(
-                "{}gtk  = {{ git = \"https://github.com/gtk-rs/gtk\",  features = [\"v3_24\"] }}
-gdk  = {{ git = \"https://github.com/gtk-rs/gdk\",  features = [\"v3_24\"] }}
-gio  = {{ git = \"https://github.com/gtk-rs/gio\",  features = [\"v2_60\"] }}
-glib = {{ git = \"https://github.com/gtk-rs/glib\", features = [\"v2_60\"] }}
+                "{}[dependencies]
+log = \"0.4\"
+gettext-rs = {{ version = \"0.5\", features = [\"gettext-system\"] }}
 
-libhandy = {{ git = \"https://gitlab.gnome.org/kavanmevada/libhandy-rs\", branch=\"devel\" }}
-gettext-rs = {{ version = \"0.4.4\" , features = [\"gettext-system\"] }}\n\n[package.metadata.pkg]\nid = \"{}\"\nname = \"{}\"",
-                std::fs::read_to_string(&toml).ok()?,
+[dependencies.gtk]
+git = \"https://github.com/gtk-rs/gtk4\"
+package = \"gtk4\"
+
+[dependencies.glib]
+git = \"https://github.com/gtk-rs/glib\"
+features = [\"v2_60\"]
+
+[dependencies.gio]
+git = \"https://github.com/gtk-rs/gio\"
+features = [\"v2_60\"]
+
+[dependencies.gdk]
+git = \"https://github.com/gtk-rs/gdk4\"
+package = \"gdk4\"
+                \n\n[package.metadata.pkg]\nid = \"{}\"\nname = \"{}\"",
+                &template[..template.len() - 15],
                 id,
                 name
             ),
@@ -192,32 +216,21 @@ gettext-rs = {{ version = \"0.4.4\" , features = [\"gettext-system\"] }}\n\n[pac
         std::fs::write(
             &PathBuf::from(bin).join("src").join("main.rs"),
             "use gettextrs::*;
-extern crate gio;
+            extern crate gio;
 extern crate gtk;
 
 use gio::prelude::*;
 use gtk::prelude::*;
+use gtk::ApplicationWindow;
 
 include!(env!(\"CONFIG_PATH\"));
 
 use std::env::args;
 
-fn build_ui(application: &gtk::Application) {
-    let window = gtk::ApplicationWindow::new(application);
-
-    window.set_title(APP_NAME);
-    window.set_border_width(10);
-    window.set_position(gtk::WindowPosition::Center);
-    window.set_default_size(350, 70);
-
-    let button = gtk::Button::with_label(\"Click me!\");
-
-    window.add(&button);
-
-    window.show_all();
-}
-
 fn main() {
+    // Initiialize gtk, gstreamer, and libhandy.
+    gtk::init().expect(\"Failed to initialize gtk!\");
+
     // Setup language / translations
     setlocale(LocaleCategory::LcAll, \"\");
     bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
@@ -228,16 +241,31 @@ fn main() {
         .expect(\"Could not load resources\");
     gio::resources_register(&res);
 
+    // Set up CSS
+    let provider = gtk::CssProvider::new();
+    provider.load_from_resource(&(GRESOURCE_ID.to_owned() + \"style.css\"));
+    gtk::StyleContext::add_provider_for_display(
+        &gdk::Display::get_default().unwrap(),
+        &provider,
+        600,
+    );
+
     let application =
         gtk::Application::new(Some(APP_ID), Default::default())
             .expect(\"Initialization failed...\");
 
     application.connect_activate(|app| {
-        build_ui(app);
+        let builder = gtk::Builder::from_resource(&(GRESOURCE_ID.to_owned() + \"window.ui\"));
+
+        let window: ApplicationWindow = builder.get_object(\"window\").expect(\"Couldn't get window\");
+        window.set_application(Some(app));
+    
+        window.show();
     });
 
     application.run(&args().collect::<Vec<_>>());
-}")
+}",
+        )
         .ok()?;
 
         let datadir = PathBuf::from(bin.to_string() + "/data");
@@ -294,8 +322,46 @@ StartupNotify=true",
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <gresources>
     <gresource prefix=\"/@GRESOURCE_ID@/\">
+        <file compressed=\"true\" preprocess=\"xml-stripblanks\">window.ui</file>
+        <file compressed=\"true\" alias=\"style.css\">style.css</file>
     </gresource>
 </gresources>",
+        )
+        .ok()?;
+
+        std::fs::write(
+            datadir.join("resources").join("window.ui"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<interface>
+    <object class=\"GtkApplicationWindow\" id=\"window\">
+    <property name=\"visible\">True</property>
+    <property name=\"can_focus\">False</property>
+    <property name=\"default_width\">600</property>
+    <property name=\"default_height\">400</property>
+    <child type=\"titlebar\">
+        <object class=\"GtkHeaderBar\" id=\"headerbar\">
+        <property name=\"visible\">True</property>
+        <property name=\"can_focus\">False</property>
+        </object>
+    </child>
+    <child>
+        <object class=\"GtkLabel\" id=\"label\">
+        <property name=\"visible\">True</property>
+        <property name=\"can_focus\">False</property>
+        <property name=\"label\" translatable=\"yes\">Hello world!</property>
+        <style>
+            <class name=\"title-header\"/>
+        </style>
+        </object>
+    </child>
+    </object>
+</interface>",
+        )
+        .ok()?;
+
+        std::fs::write(
+            datadir.join("resources").join("style.css"),
+            ".title-header { font-size: 40px }",
         )
         .ok()?;
 

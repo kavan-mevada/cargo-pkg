@@ -190,27 +190,29 @@ impl<'a> Commands<'a> {
         pub static APP_NAME: &str = \"{}\";
         pub static PROFILE: &str = \"{}\";
         pub static VERSION: &str = \"{}\";
-        pub static GETTEXT_PACKAGE: &str = \"{}\";",
+        pub static GETTEXT_PACKAGE: &str = \"{}\";
+        pub static GRESOURCE_ID: &str = \"{}\";",
             &self.metadata.id,
             &self.metadata.name,
             self.profile,
             &self.metadata.version,
-            &self.metadata.bin
+            &self.metadata.bin,
+            ["/", &self.metadata.id.replace(".", "/"), "/"].concat()
         )
         .to_owned();
 
-        let appdatadir = &prefix.join("share").join("appdata");
-        if appdatadir.exists() {
+        let pkgdatadir = &prefix.join("share").join(&self.metadata.id);
+        if pkgdatadir.exists() {
             config.push_str(&format!(
-                "pub static PKGDATADIR: &str = \"{}\";",
-                std::fs::canonicalize(appdatadir).ok()?.as_path().to_str()?
+                "\npub static PKGDATADIR: &str = \"{}\";",
+                std::fs::canonicalize(pkgdatadir).ok()?.as_path().to_str()?
             ));
         }
 
         let localedir = &prefix.join("share").join("locale");
         if localedir.exists() {
             config.push_str(&format!(
-                "pub static LOCALEDIR: &str = \"{}\";",
+                "\npub static LOCALEDIR: &str = \"{}\";",
                 std::fs::canonicalize(localedir).ok()?.as_path().to_str()?
             ));
         }
@@ -218,23 +220,40 @@ impl<'a> Commands<'a> {
         std::fs::create_dir_all(&outdir).ok()?;
         let dest_path = &outdir.join("config.rs");
         std::fs::write(&dest_path.as_path(), &config).ok()?;
-        env::set_var("CONFIG_PATH", dest_path.as_path().to_str()?);
+        env::set_var(
+            "CONFIG_PATH",
+            std::fs::canonicalize(dest_path).ok()?.as_path().to_str()?,
+        );
 
         Some(())
     }
 
     // Install binary
-    pub fn install_binary(&self, buildflags: &[String], prefix: &PathBuf) -> Option<()> {
-        Command::new("cargo")
-            .args(&["install", "--force"])
-            .args(buildflags)
-            .args(&["--path", ".", "--root"])
-            .arg(prefix.to_str()?)
-            .status()
-            .ok()?;
+    pub fn install_binary(
+        &self,
+        buildflags: &[String],
+        prefix: &PathBuf,
+    ) -> Option<std::process::ExitStatus> {
+        let output;
+        if buildflags.len() == 0 {
+            output = Command::new("cargo")
+                .args(&["install", "--force"])
+                .args(&["--path", ".", "--root"])
+                .arg(prefix.to_str()?)
+                .status()
+                .ok()?;
+        } else {
+            output = Command::new("cargo")
+                .args(&["install", "--force"])
+                .args(buildflags)
+                .args(&["--path", ".", "--root"])
+                .arg(prefix.to_str()?)
+                .status()
+                .ok()?;
+        }
         std::fs::remove_file(prefix.join(".crates2.json").as_path()).ok()?;
         std::fs::remove_file(prefix.join(".crates.toml").as_path()).ok()?;
 
-        Some(())
+        Some(output)
     }
 }

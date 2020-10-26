@@ -8,9 +8,9 @@ Install `cargo pkg` by running: `cargo install cargo-pkg`.
 
 ## Initialize Project
 
-To create new project, run `cargo pkg new`
+To create new project in GTK4, run `cargo pkg new -id "io.foo.Bar" --name "Foo Bar" foo-bar`
 
-This will create a project with ID `io.foo.Bar` with following structure.
+This will create a project with ID `io.foo.Bar` with following structure in `foo-bar` directory.
 ```
 ├── Cargo.toml
 ├── data
