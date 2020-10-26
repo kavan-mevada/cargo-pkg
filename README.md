@@ -37,6 +37,30 @@ name = "Foo Bar"
 
 To change package name only change require is `name = "Foo Bar"` in toml.
 
+## Setup Enviornment for GTK4
+
+This section will setup GTK-4 enviroment even your destribution not providing latest GTK4 dependencies. If your distribution provides bleading edge GTK-4 dependencies you can ignore this section.
+
+Install flatpak if not exist. `apt-get` is for deb package manager
+`apt-get install flatpak`
+
+Add gnome-nightly repository to flatpak for latest GTK-4 dependencies
+`flatpak remote-add --if-not-exists gnome-nightly https://nightly.gnome.org/gnome-nightly.flatpakrepo`
+
+Add flathub repository for rust stable
+`flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo`
+
+Install gnome sdk and rust-stable sdk
+```
+flatpak install --user gnome-nightly org.gnome.Sdk//master -y
+flatpak install --user flathub org.freedesktop.Sdk.Extension.rust-stable//20.08 -y
+```
+
+To get a shell inside an flatpak’s sandbox
+`flatpak run --env=PATH=$PATH:/lib/sdk/rust-stable/bin --share=network --filesystem=$(PWD) --command=sh org.gnome.Sdk//master`
+
+
+(Now you can go through Installation steps)
 
 
 ## Building & Installing Package
